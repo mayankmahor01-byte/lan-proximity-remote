@@ -9,43 +9,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate Project & Build APK
+      - name: Build APK via Python Generator
         run: |
-          mkdir -p app/src/main/java/com/mahor/lanremote
+          python3 - << 'PY'
+          import os, subprocess
 
-          cat << 'EOF' > gradle.properties
-          android.useAndroidX=true
-          kotlin.code.style=official
-          EOF
+          os.makedirs("app/src/main/java/com/mahor/lanremote", exist_ok=True)
 
-          cat << 'EOF' > settings.gradle
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
+          files = {
+              "gradle.properties": "android.useAndroidX=true\nkotlin.code.style=official\n",
+              "settings.gradle": """pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
           }
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
           rootProject.name = "LANProximityRemote"
           include ':app'
-          EOF
-
-          cat << 'EOF' > build.gradle
-          plugins {
+          """,
+              "build.gradle": """plugins {
               id 'com.android.application' version '8.2.2' apply false
               id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
           }
-          EOF
-
-          cat << 'EOF' > app/build.gradle
-          plugins {
+          """,
+              "app/build.gradle": """plugins {
               id 'com.android.application'
               id 'org.jetbrains.kotlin.android'
           }
@@ -63,18 +51,14 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
-              kotlinOptions {
-                  jvmTarget = '17'
-              }
+              kotlinOptions { jvmTarget = '17' }
           }
           dependencies {
               implementation 'androidx.core:core-ktx:1.12.0'
               implementation 'androidx.appcompat:appcompat:1.6.1'
           }
-          EOF
-
-          cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
+          """,
+              "app/src/main/AndroidManifest.xml": """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -84,10 +68,7 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
               <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
               <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-              <application
-                  android:allowBackup="true"
-                  android:label="LAN Smart Remote"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+              <application android:allowBackup="true" android:label="LAN Smart Remote" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -96,10 +77,8 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          EOF
-
-          cat << 'EOF' > app/src/main/java/com/mahor/lanremote/MainActivity.kt
-          package com.mahor.lanremote
+          """,
+              "app/src/main/java/com/mahor/lanremote/MainActivity.kt": """package com.mahor.lanremote
 
           import android.Manifest
           import android.annotation.SuppressLint
@@ -240,144 +219,4 @@ jobs:
                       listOf("LEFT" to "KEY_LEFT", "OK" to "KEY_ENTER", "RIGHT" to "KEY_RIGHT"),
                       listOf("DOWN" to "KEY_DOWN"),
                       listOf("BACK" to "KEY_BACK", "HOME" to "KEY_HOME"),
-                      listOf("VOL -" to "KEY_VOLDOWN", "PLAY/PAUSE" to "KEY_PLAYPAUSE", "VOL +" to "KEY_VOLUP")
-                  )
-
-                  for (row in buttons) {
-                      val rowLayout = LinearLayout(this).apply {
-                          orientation = LinearLayout.HORIZONTAL
-                          gravity = Gravity.CENTER
-                          setPadding(0, 12, 0, 12)
-                      }
-                      for ((label, cmd) in row) {
-                          val btn = Button(this).apply {
-                              text = label
-                              setTextColor(Color.WHITE)
-                              background = pillDrawable("#21262D")
-                              setPadding(36, 28, 36, 28)
-                              setOnClickListener { sendLanCommand(cmd) }
-                          }
-                          val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                              setMargins(10, 0, 10, 0)
-                          }
-                          rowLayout.addView(btn, params)
-                      }
-                      root.addView(rowLayout)
-                  }
-                  setContentView(root)
-              }
-
-              private fun pillDrawable(hex: String) = GradientDrawable().apply {
-                  setColor(Color.parseColor(hex))
-                  cornerRadius = 24f
-              }
-
-              private fun sendLanCommand(command: String) {
-                  val target = activeDevice ?: return
-                  udpExecutor.execute {
-                      try {
-                          val socket = DatagramSocket()
-                          val payload = "MAHOR_REMOTE|${target.id}|$command".toByteArray(StandardCharsets.UTF_8)
-                          val packet = DatagramPacket(payload, payload.size, InetAddress.getByName(target.ip), target.port)
-                          socket.send(packet)
-                          socket.close()
-                      } catch (e: Exception) {
-                          uiHandler.post {
-                              Toast.makeText(this, "LAN Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                          }
-                      }
-                  }
-              }
-
-              private fun requestBlePermissions() {
-                  val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                      arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-                  } else {
-                      arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-                  }
-                  if (perms.any { ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
-                      ActivityCompat.requestPermissions(this, perms, 101)
-                  } else {
-                      startBleScanner()
-                  }
-              }
-
-              override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-                  super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-                  if (requestCode == 101 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                      startBleScanner()
-                  }
-              }
-
-              @SuppressLint("MissingPermission")
-              private fun startBleScanner() {
-                  val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-                  val scanner = btManager.adapter?.bluetoothLeScanner ?: return
-                  val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
-
-                  scanner.startScan(null, settings, object : ScanCallback() {
-                      override fun onScanResult(callbackType: Int, result: ScanResult) {
-                          val advName = result.device.name ?: result.scanRecord?.deviceName ?: return
-                          if (advName.startsWith("LANREM|")) {
-                              val parts = advName.split("|")
-                              if (parts.size == 4) {
-                                  val id = parts[1]
-                                  val ip = parts[2]
-                                  val port = parts[3].toIntOrNull() ?: 9876
-                                  val now = System.currentTimeMillis()
-                                  val target = devices.getOrPut(id) {
-                                      LanTarget(id, id, ip, port, result.rssi.toDouble(), now)
-                                  }
-                                  target.smoothedRssi = (0.35 * result.rssi) + (0.65 * target.smoothedRssi)
-                                  target.lastSeen = now
-                                  refreshSpinner()
-                                  if (isAutoMode) evaluateProximity()
-                              }
-                          }
-                      }
-                  })
-              }
-
-              private fun evaluateProximity() {
-                  val now = System.currentTimeMillis()
-                  val recent = devices.values.filter { now - it.lastSeen < 5000 }
-                  val strongest = recent.maxByOrNull { it.smoothedRssi } ?: return
-                  val current = activeDevice
-
-                  if (current == null || (strongest.id != current.id && strongest.smoothedRssi > current.smoothedRssi + 8.0)) {
-                      activeDevice = strongest
-                      updateStatusUi()
-                  }
-              }
-
-              private fun updateStatusUi() {
-                  uiHandler.post {
-                      val dev = activeDevice
-                      statusText.text = "Active: ${dev?.name} (${dev?.ip}) | Signal: ${dev?.smoothedRssi?.toInt()} dBm"
-                  }
-              }
-
-              private fun refreshSpinner() {
-                  uiHandler.post {
-                      deviceListLabels.clear()
-                      deviceListIds.clear()
-                      devices.values.forEach {
-                          deviceListLabels.add("${it.name} (${it.ip})")
-                          deviceListIds.add(it.id)
-                      }
-                      spinnerAdapter.notifyDataSetChanged()
-                  }
-              }
-          }
-          EOF
-
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          ./gradle-8.5/bin/gradle assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: LAN-Proximity-Remote-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+                      listOf("VOL -" to "KEY_VOLDOWN", "PLAY/PAUSE" to "KEY_PLAYPAUSE", "VOL +" to "KEY_
